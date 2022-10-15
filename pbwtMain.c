@@ -251,7 +251,9 @@ int main (int argc, char *argv[])
       fprintf (stderr, "  -maxWithin                find maximal matches within set\n") ;
       fprintf (stderr, "  -matchNaive <file>        maximal match seqs in pbwt file to reference\n") ;
       fprintf (stderr, "  -matchIndexed <file>      maximal match seqs in pbwt file to reference\n") ;
+      fprintf (stderr, "  -matchIndexedStat <file>      maximal match seqs with stat in pbwt file to reference\n") ;
       fprintf (stderr, "  -matchDynamic <file>      maximal match seqs in pbwt file to reference\n") ;
+      fprintf (stderr, "  -matchDynamicStat <file>      maximal match seqs with stat in pbwt file to reference\n") ;
       fprintf (stderr, "  -imputeExplore <n>        n'th impute test\n") ;
       fprintf (stderr, "  -phase <n>                phase with n sparse pbwts\n") ;
       fprintf (stderr, "  -referencePhase <root>    phase current pbwt against reference whose root name is the argument - only keeps shared sites\n") ;
@@ -407,6 +409,10 @@ int main (int argc, char *argv[])
       { pbwtLongMatches (p, atoi(argv[1])) ; argc -= 2 ; argv += 2 ; }
     else if (!strcmp (argv[0], "-matchNaive") && argc > 1)
       { FOPEN("matchNaive","r") ; matchSequencesNaive (p, fp) ; FCLOSE ; argc -= 2 ; argv += 2 ; }
+    else if (!strcmp (argv[0], "-matchIndexedStat") && argc > 1)
+      { FOPEN("matchIndexed","r") ; matchSequencesIndexedStat (p, fp, argv[1]) ; FCLOSE ; argc -= 2 ; argv += 2 ; }
+    else if (!strcmp (argv[0], "-matchDynamicStat") && argc > 1)
+      { FOPEN("matchDynamic","r") ; matchSequencesDynamicStat (p, fp, argv[1]) ; FCLOSE ; argc -= 2 ; argv += 2 ; }
     else if (!strcmp (argv[0], "-matchIndexed") && argc > 1)
       { FOPEN("matchIndexed","r") ; matchSequencesIndexed (p, fp) ; FCLOSE ; argc -= 2 ; argv += 2 ; }
     else if (!strcmp (argv[0], "-matchDynamic") && argc > 1)

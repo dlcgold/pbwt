@@ -175,6 +175,8 @@ void pbwtWriteAll (PBWT *p, char *fileNameRoot) ;
 void pbwtWriteGen (PBWT *p, FILE *fp) ; /* write gen file as for impute etc. */
 void pbwtWritePhase (PBWT *p, char *filename); /* Write phase file as output by impute and input for chromopainter */
 PBWT *pbwtRead (FILE *fp) ;
+PBWT *pbwtReadStat (FILE *fp) ;
+
 Array pbwtReadSitesFile (FILE *fp, char **chrom) ;
 void pbwtReadSites (PBWT *p, FILE *fp) ;
 void pbwtReadRefFreq (PBWT *p, FILE *fp) ;
@@ -209,8 +211,20 @@ void matchMaximalWithin (PBWT *p, void (*report)(int, int, int, int)) ;
 void pbwtLongMatches (PBWT *p, int L) ; /* internal matches longer than L, maximal if L=0 */
 void matchSequencesNaive (PBWT *p, FILE *fp) ; /* fp is a pbwt file of sequences to match */
 void matchSequencesIndexed (PBWT *p, FILE *fp) ;
+void matchSequencesIndexedStat (PBWT *p, FILE *fp, char*) ;
+
 void matchSequencesDynamic (PBWT *p, FILE *fp) ;
+void matchSequencesDynamicStat (PBWT *p, FILE *fp, char*) ;
+
 void matchSequencesSweep (PBWT *p, PBWT *q, void (*report)(int, int, int, int)) ;
+
+struct pair {
+  float time;
+  int nTot;
+  int totlen;
+};
+struct pair matchSequencesSweepStat (PBWT *p, PBWT *q, int nq, void (*report)(int, int, int, int)) ;
+
 void matchSequencesSweepSparse (PBWT *p, PBWT *q, int nSparse,
 				void (*report)(int, int, int, int, BOOL)) ;
 

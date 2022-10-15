@@ -22,6 +22,9 @@
  */
 
 #include "pbwt.h"
+#include <time.h>
+#include <math.h>
+
 
 /************ finding long (or maximal) matches within the set ************/
 
@@ -49,8 +52,8 @@ static void reportMatch (int ai, int bi, int start, int end)
   printf ("MATCH\t%d\t%d\t%d\t%d\t%d\n", ai, bi, start, end, end-start) ;
 
   /* following is text originally used for new sequence matching
-  printf ("MATCH query %d to reference %d from %d to %d length %d\n",
-          ai, bi, start, end, end - start) ;
+     printf ("MATCH query %d to reference %d from %d to %d length %d\n",
+     ai, bi, start, end, end - start) ;
   */
 
   if (isCheck)			/* check match is a real match and maximal */
@@ -254,6 +257,7 @@ void matchSequencesNaive (PBWT *p, FILE *fp) /* fp is a pbwt file of sequences t
 
 void matchSequencesIndexed (PBWT *p, FILE *fp)
 {
+  
   PBWT *q = pbwtRead (fp) ;	/* q for "query" of course */
   uchar **query = pbwtHaplotypes (q) ; /* make the query sequences */
   uchar **reference = pbwtHaplotypes (p) ; /* haplotypes for reference */
@@ -273,8 +277,10 @@ void matchSequencesIndexed (PBWT *p, FILE *fp)
   d = myalloc (N+1,int*) ; for (i = 0 ; i < N+1 ; ++i) d[i] = myalloc (p->M+1, int) ;
   u = myalloc (N,int*) ; for (i = 0 ; i < N ; ++i) u[i] = myalloc (p->M+1, int) ;
   int *cc = myalloc (p->N, int) ;
+  
   for (k = 0 ; k < N ; ++k)
-    { memcpy (a[k], up->a, M*sizeof(int)) ;
+    {
+      memcpy (a[k], up->a, M*sizeof(int)) ;
       memcpy (d[k], up->d, (M+1)*sizeof(int)) ;
       cc[k] = up->c ;
       pbwtCursorCalculateU (up) ;
@@ -286,26 +292,27 @@ void matchSequencesIndexed (PBWT *p, FILE *fp)
   pbwtCursorDestroy (up) ;
 
   fprintf (logFile, "Made haplotypes and indices: ") ; timeUpdate (logFile) ;
-
   if (isCheck) { checkHapsA = query ; checkHapsB = reference ; Ncheck = p->N ; }
 
+  
   /* match each query in turn */
 
   for (j = 0 ; j < q->M ; ++j)
-    { x = query[j] ;
+    {
+      x = query[j] ;
       e = 0 ; f = 0 ; g = M ;
       for (k = 0 ; k < N ; ++k)
 	{               /* use classic FM updates to extend [f,g) interval to next position */
 	  f1 = x[k] ? cc[k] + (f - u[k][f]) : u[k][f] ;
 	  g1 = x[k] ? cc[k] + (g - u[k][g]) : u[k][g] ; 
-	  		/* if the interval is non-zero we can just proceed */
+	  /* if the interval is non-zero we can just proceed */
 	  if (g1 > f1)
 	    { f = f1 ; g = g1 ; } /* no change to e */
 	  else		/* we have reached a maximum - need to report and update e, f*,g* */
 	    { for (i = f ; i < g ; ++i)		/* first report matches */
 		reportMatch (j, a[k][i], e, k) ;
 	      ++nTot ; totLen += k-e ;
-	      		/* then update e,f,g */
+	      /* then update e,f,g */
 	      e1 = d[k+1][f1] - 1 ; /* y[f1] and y[f1-1] diverge here, so upper bound for e */
 	      if ((x[e1] == 0 && f1 > 0) || f1 == M)
 		{ f1 = g1 - 1 ;
@@ -325,7 +332,116 @@ void matchSequencesIndexed (PBWT *p, FILE *fp)
 	reportMatch (j, a[k][i], e, k) ;
       ++nTot ; totLen += k-e ;
     }
+ 
+  fprintf (logFile, "Average number of best matches %.1f, Average length %.1f\n", 
+	   nTot/(double)q->M, totLen/(double)nTot) ;
 
+  /* cleanup */
+  free (cc) ;
+  for (j = 0 ; j < q->M ; ++j) free(query[j]) ; free (query) ;
+  pbwtDestroy (q) ;
+  for (j = 0 ; j < p->M ; ++j) free(reference[j]) ; free (reference) ;
+  for (j = 0 ; j < N ; ++j) free(a[j]) ; free (a) ;
+  for (j = 0 ; j < N ; ++j) free(d[j]) ; free (d) ;
+  for (j = 0 ; j < N ; ++j) free(u[j]) ; free (u) ;
+}
+
+void matchSequencesIndexedStat (PBWT *p, FILE *fp, char* filename)
+{
+  PBWT *q = pbwtRead (fp) ;	/* q for "query" of course */
+  uchar **query = pbwtHaplotypes (q) ; /* make the query sequences */
+  uchar **reference = pbwtHaplotypes (p) ; /* haplotypes for reference */
+  uchar *x, *y ;                /* use for current query, and selected reference query */
+  PbwtCursor *up = pbwtCursorCreate (p, TRUE, TRUE) ;
+  int **a, **d, **u ;		/* stored indexes */
+  int e, f, g ;			/* start of match, and pbwt interval as in algorithm 5 */
+  int e1, f1, g1 ;		/* next versions of the above, e' etc in algorithm 5 */
+  int i, j, k, N = p->N, M = p->M ;
+  int totLen = 0, nTot = 0 ;
+
+  if (q->N != p->N) die ("query length in matchSequences %d != PBWT length %d", q->N, p->N) ;
+
+  /* build indexes */
+
+  a = myalloc (N+1,int*) ; for (i = 0 ; i < N+1 ; ++i) a[i] = myalloc (p->M, int) ;
+  d = myalloc (N+1,int*) ; for (i = 0 ; i < N+1 ; ++i) d[i] = myalloc (p->M+1, int) ;
+  u = myalloc (N,int*) ; for (i = 0 ; i < N ; ++i) u[i] = myalloc (p->M+1, int) ;
+  int *cc = myalloc (p->N, int) ;
+  
+  for (k = 0 ; k < N ; ++k)
+    {
+      memcpy (a[k], up->a, M*sizeof(int)) ;
+      memcpy (d[k], up->d, (M+1)*sizeof(int)) ;
+      cc[k] = up->c ;
+      pbwtCursorCalculateU (up) ;
+      memcpy (u[k], up->u, (M+1)*sizeof(int)) ;
+      pbwtCursorForwardsReadAD (up, k) ;
+    }
+  memcpy (a[k], up->a, M*sizeof(int)) ;
+  memcpy (d[k], up->d, (M+1)*sizeof(int)) ;
+  pbwtCursorDestroy (up) ;
+
+  fprintf (logFile, "Made haplotypes and indices: ") ; timeUpdate (logFile) ;
+  if (isCheck) { checkHapsA = query ; checkHapsB = reference ; Ncheck = p->N ; }
+
+  // stuff for statistics
+  char tmp[] = ".indexed-stat";
+  char* stat_file = strcat(filename, tmp);
+  double times[q->M];
+  /* match each query in turn */
+
+  for (j = 0 ; j < q->M ; ++j)
+    {
+      x = query[j] ;
+      e = 0 ; f = 0 ; g = M ;
+      clock_t START = clock();
+      for (k = 0 ; k < N ; ++k)
+	{               /* use classic FM updates to extend [f,g) interval to next position */
+	  f1 = x[k] ? cc[k] + (f - u[k][f]) : u[k][f] ;
+	  g1 = x[k] ? cc[k] + (g - u[k][g]) : u[k][g] ; 
+	  /* if the interval is non-zero we can just proceed */
+	  if (g1 > f1)
+	    { f = f1 ; g = g1 ; } /* no change to e */
+	  else		/* we have reached a maximum - need to report and update e, f*,g* */
+	    { for (i = f ; i < g ; ++i)		/* first report matches */
+		reportMatch (j, a[k][i], e, k) ;
+	      ++nTot ; totLen += k-e ;
+	      /* then update e,f,g */
+	      e1 = d[k+1][f1] - 1 ; /* y[f1] and y[f1-1] diverge here, so upper bound for e */
+	      if ((x[e1] == 0 && f1 > 0) || f1 == M)
+		{ f1 = g1 - 1 ;
+		  y = reference[a[k+1][f1]] ; while (x[e1-1] == y[e1-1]) --e1 ;
+		  while (d[k+1][f1] <= e1) --f1 ;
+		}
+	      else if (f1 < M)
+		{ g1 = f1 + 1 ;
+		  y = reference[a[k+1][f1]] ; while (x[e1-1] == y[e1-1]) --e1 ;
+		  while (g1 < M && d[k+1][g1] <= e1) ++g1 ;
+		}
+	      e = e1 ; f = f1 ; g = g1 ;
+	    }
+	}
+      /* report the maximal matches to the end */
+      for (i = f ; i < g ; ++i)
+	reportMatch (j, a[k][i], e, k) ;
+      ++nTot ; totLen += k-e ;
+      times[j] = (float) (clock() - START) / CLOCKS_PER_SEC;
+    }
+  double sum = 0.0;
+  double mean = 0.0;
+  double sd = 0.0;
+  for(int i = 0; i < q->M; i++)
+    sum+= times[i];
+  mean = sum / q->M;
+  sum = 0.0;
+  for(int i = 0; i < q->M; i++)
+    sum+= (times[i] - mean) * (times[i] - mean);
+  sd = sqrt(sum / q->M);
+  FILE *sfile;
+  sfile = fopen(stat_file, "w");
+  fprintf(sfile, "Mean: %f\n", mean);
+  fprintf(sfile, "Stdev: %f\n", sd);
+  fclose(sfile);
   fprintf (logFile, "Average number of best matches %.1f, Average length %.1f\n", 
 	   nTot/(double)q->M, totLen/(double)nTot) ;
 
@@ -354,6 +470,153 @@ void matchSequencesDynamic (PBWT *p, FILE *fp)
   PBWT *q = pbwtRead (fp) ;	/* q for "query" of course */
   matchSequencesSweep (p, q, reportMatch) ;
   pbwtDestroy (q) ;
+}
+
+void matchSequencesDynamicStat (PBWT *p, FILE *fp, char* filename)
+{
+  PBWT *q = pbwtRead (fp) ;	/* q for "query" of course */
+  int nq = q->M;
+  int sq = q->N;
+  pbwtDestroy (q) ;
+  fclose(fp);
+  double times[nq];
+  int nTot = 0;
+  int totLen = 0;
+  clock_t START=clock();
+  /* FILE* fptt; */
+  /* fptt = fopen(filename, "r"); */
+  /* PBWT *tt = pbwtReadStat (fptt); */
+ 
+  /* PBWT *qtmpt =  pbwtSubSampleInterval(tt, 0, 50); */
+  /* fprintf(logFile, "Size: %d x %d\n", qtmpt->M, qtmpt->N); */
+  /* fprintf(logFile, "Build: %f\n",  (float) (clock() - START) / CLOCKS_PER_SEC); */
+  /* struct pair rest = matchSequencesSweepStat (p, qtmpt, 50,reportMatch) ; */
+  /* fprintf(logFile, "Query: %f\n", rest.time); */
+  /* FILE *fpttt; */
+  /*  fpttt = fopen(filename, "r"); */
+  /* PBWT *ttt = pbwtReadStat (fpttt); */
+  /* PBWT *qtmptt =  pbwtSubSampleInterval(ttt, 50, 49); */
+  /* fprintf(logFile, "Size: %d x %d\n", qtmptt->M, qtmptt->N); */
+  /* fprintf(logFile, "Build: %f\n",  (float) (clock() - START) / CLOCKS_PER_SEC); */
+  /* struct pair restt = matchSequencesSweepStat (p, qtmptt, 50,reportMatch) ; */
+  /* fprintf(logFile, "Query: %f\n", restt.time); */
+  for(int j = 0 ; j<nq; j++){
+    FILE* fpt;
+    fpt = fopen(filename, "r");
+    START = clock();
+    PBWT *t = pbwtReadStat (fpt);
+    PBWT *qtmp =  pbwtSubSampleInterval(t, j, 1);
+    //fprintf(logFile, "Size: %d x %d\n", qtmp->M, qtmp->N);
+    //fprintf(logFile, "Build: %f\n",  (float) (clock() - START) / CLOCKS_PER_SEC);
+    struct pair res = matchSequencesSweepStat (p, qtmp, j,reportMatch) ;
+    times[j] = res.time;
+    //fprintf(logFile, "Query: %f\n",  times[j]);
+    nTot += res.nTot;
+    totLen += res.totlen;
+    pbwtDestroy (qtmp) ;
+  }
+  fprintf (logFile, "Average number of best matches including alternates %.1f, Average length %.1f, Av number per position %.1f\n", 
+	   nTot/(double)nq, totLen/(double)nTot, totLen/(double)(nq*sq)) ;
+  // stuff for statistics
+  char tmp[] = ".dynamic-stat";
+  char* stat_file = strcat(filename, tmp);
+  double sum = 0.0;
+  double mean = 0.0;
+  double sd = 0.0;
+  for(int i = 0; i < nq; i++)
+    sum+= times[i];
+  mean = sum / (double)nq;
+  sum = 0.0;
+  for(int i = 0; i < nq; i++)
+    sum+= (times[i] - mean) * (times[i] - mean);
+  sd = sqrt(sum / nq);
+  FILE *sfile;
+  sfile = fopen(stat_file, "w");
+  fprintf(sfile, "Mean: %f\n", mean);
+  fprintf(sfile, "Stdev: %f\n", sd);
+  fclose(sfile);
+  //pbwtDestroy (q) ;
+}
+struct pair matchSequencesSweepStat (PBWT *p, PBWT *q, int nq, void (*report)(int ai, int bi, int start, int end))
+{
+  if (q->N != p->N) die ("query length in matchSequences %d != PBWT length %d", q->N, p->N) ;
+  PbwtCursor *up = pbwtCursorCreate (p, TRUE, TRUE) ;
+  PbwtCursor *uq = pbwtCursorCreate (q, TRUE, TRUE) ;
+  int *f = mycalloc (q->M, int) ; /* first location in *up of longest match to j'th query */
+  int *d = mycalloc (q->M, int) ; /* start of longest match to j'th query */
+  long totLen = 0, nTot = 0 ;
+
+  if (isCheck) { checkHapsA = pbwtHaplotypes (q) ; checkHapsB = pbwtHaplotypes (p) ; Ncheck = p->N ; }
+
+  clock_t START = clock();
+  int i, j, k ;
+  for (k = 0 ; k < p->N ; ++k)
+    {
+     for (j = 0 ; j < q->M ; ++j)
+	{ int jj = uq->a[j] ;
+	  uchar x = uq->y[j] ;
+	  if (up->y[f[jj]] != x)
+	    { /* first see if there is any match of the same length that can be extended */
+	      int iPlus = f[jj] ; /* is an index into *up greater than f[jj] */
+	      while (++iPlus < p->M && up->d[iPlus] <= d[jj])
+		if (up->y[iPlus] == x) { f[jj] = iPlus ; goto DONE ; }
+	      /* if not, then report these matches */
+	      for (i = f[jj] ; i < iPlus ; ++i) (*report) (nq, up->a[i], d[jj], k) ;
+	      nTot += (iPlus - f[jj]) ; totLen += (k - d[jj])*(iPlus - f[jj]) ;
+	      /* then find new top longest match that can be extended */
+	      /* we extend out the interval [iMinus, iPlus] until we find this best match */
+	      int iMinus = f[jj] ; /* an index into *up less than f[jj] */
+	      int dPlus = (iPlus < p->M) ? up->d[iPlus] : k ;
+	      int dMinus = up->d[iMinus] ;
+	      while (TRUE)
+		if (dMinus <= dPlus)
+		  { i = -1 ;	/* impossible value */
+		    while (up->d[iMinus] <= dMinus) /* up->d[0] = k+1 prevents underflow */
+		      if (up->y[--iMinus] == x) i = iMinus ;
+		    if (i >= 0) { f[jj] = i ; d[jj] = dMinus ; goto DONE ; }
+		    dMinus = up->d[iMinus] ;
+		  }
+		else		/* dPlus < dMinus */
+		  { while (iPlus < p->M && up->d[iPlus] <= dPlus)
+		      if (up->y[iPlus] == x) { f[jj] = iPlus ; d[jj] = dPlus ; goto DONE ; }
+		      else ++iPlus ;
+		    dPlus = (iPlus == p->M) ? k : up->d[iPlus] ;
+		    if (!iMinus && iPlus == p->M) 
+		      { fprintf (logFile, "no match to query %d value %d at site %d\n", 
+				 nq, x, k) ;
+			d[jj] = k+1 ;
+			goto DONE ; 
+		      }
+		  }
+	    }
+	DONE: ;
+	}
+      
+      /* next update the match location f[] of each query */
+      pbwtCursorCalculateU (up) ;
+      for (j = 0 ; j < q->M ; ++j)
+	{ int jj = uq->a[j] ;
+	  f[jj] = pbwtCursorMap (up, uq->y[j], f[jj]) ;
+	  /* trap if x == 1 and all up->y[] == 0, so d[jj] == k+1 (see above) */
+	  if (f[jj] == p->M) f[jj] = 0 ; 
+	}	  
+     
+      pbwtCursorForwardsReadAD (up, k) ;
+      pbwtCursorForwardsRead (uq) ;
+    }
+  /* finally need to record the matches ending at p->N */
+  for (j = 0 ; j < q->M ; ++j)
+    { int jj = uq->a[j] ;
+      (*report) (nq, up->a[f[jj]], d[jj], p->N) ;
+      for (i = f[jj] ; ++i < p->M && up->d[i] <= d[jj] ; )
+	(*report) (nq, up->a[i], d[jj], p->N) ;
+      nTot += (i - f[jj]) ; totLen += (p->N - d[jj])*(i - f[jj]) ;
+    }
+  float time = (float) (clock() - START) / CLOCKS_PER_SEC;
+  pbwtCursorDestroy (up) ; pbwtCursorDestroy (uq) ;
+  free (f) ; free (d) ;
+  struct pair res = {time, nTot, totLen};
+  return res;
 }
 
 /* Simple and fast dynamic search - use also for imputation and painting.
@@ -499,7 +762,7 @@ static void reportAndUpdate (int j, int k, uchar x, PbwtCursor *up, int *f, int 
 }
 
 void matchSequencesSweepSparse (PBWT *p, PBWT *q, int nSparse,
-	   void (*report)(int ai, int bi, int start, int end, BOOL isSparse))
+				void (*report)(int ai, int bi, int start, int end, BOOL isSparse))
 {
   nSparseStore = nSparse ;
   sweepSparseReport = report ;
@@ -564,7 +827,7 @@ void matchSequencesSweepSparse (PBWT *p, PBWT *q, int nSparse,
 	  pbwtCursorForwardsAD (upp[kk], k/nSparse) ;
 	}
 
-	/* finish the main loop by moving the primary cursors forwards */
+      /* finish the main loop by moving the primary cursors forwards */
       pbwtCursorForwardsReadAD (up, k) ;
       pbwtCursorForwardsRead (uq) ;
     }

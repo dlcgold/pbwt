@@ -169,6 +169,53 @@ void pbwtCheckPoint (PbwtCursor *u, PBWT *p)
 
 /*******************************/
 
+PBWT *pbwtReadStat (FILE *fp) 
+{
+  int m, n ;
+  long nz ;
+  PBWT *p ;
+  static char tag[5] = "test" ;
+  char pad[4] ;
+  int version ;
+
+  if (fread (tag, 1, 4, fp) != 4) die ("failed to read 4 char tag - is file readable?") ;
+  if (!strcmp (tag, "PBW3")) version = 3 ; /* current version */
+  else if (!strcmp (tag, "PBW2")) version = 2 ; /* with 4 byte count */
+  else if (!strcmp (tag, "PBWT")) version = 1 ; /* without start, end indexes */
+  else if (!strcmp (tag, "GBWT")) version = 0 ; /* earliest version */
+  else die ("failed to recognise file type %s in pbwtRead - was it written by pbwt?", tag) ;
+
+  if (fread (&m, sizeof(int), 1, fp) != 1) die ("error reading m in pbwtRead") ;
+  if (fread (&n, sizeof(int), 1, fp) != 1) die ("error reading n in pbwtRead") ;
+  p = pbwtCreate (m, n) ;
+  if (version > 1)		/* read aFstart and aFend */
+    { p->aFstart = myalloc (m, int) ;
+      if (fread (p->aFstart, sizeof(int), m, fp) != m) die ("error reading aFstart in pbwtRead") ;
+      p->aFend = myalloc (m, int) ;
+      if (fread (p->aFend, sizeof(int), m, fp) != m) die ("error reading aFend in pbwtRead") ;
+    }
+  else				/* set aFstart to 0..M-1, leave aFend empty */
+    { p->aFstart = myalloc (m, int) ;
+      int i ; for (i = 0 ; i < m ; ++i) p->aFstart[i] = i ;
+    }
+
+  if (version <= 2)
+    { if (fread (&n, sizeof(int), 1, fp) != 1) die ("error reading pbwt file") ;
+      nz = n ;
+    }
+  else
+    if (fread (&nz, sizeof(long), 1, fp) != 1 ||
+	fread (pad, 1, 4, fp) != 4) die ("error reading pbwt file") ;
+
+  p->yz = arrayCreate (nz, uchar) ;
+  array(p->yz, nz-1, uchar) = 0 ; /* sets arrayMax */
+  if (fread (arrp(p->yz, 0, uchar), sizeof(uchar), nz, fp) != nz)
+    die ("error reading data in pbwt file") ;
+
+  return p ;
+}
+
+
 PBWT *pbwtRead (FILE *fp) 
 {
   int m, n ;
@@ -447,12 +494,19 @@ static BOOL parseMacsSite (FILE *fp, Site *s, int M, double L, uchar *yp) /* par
   if (strcmp (fgetword (fp), "SITE:")) return FALSE;
 
   number = atoi(fgetword(fp)) ;	/* this is the site number */
+  printf("\nhere SITE : %i\n", number);
   s->x = (int) (L * atof(fgetword(fp))) ;
+  printf("%f %d\n", L, s->x);
   atof(fgetword(fp)) ;		/* ignore the time */
-  while (M--)
+  while (M--){
     *yp++ = conv[getc(fp)] ;
+    //printf("%c", getc(fp));
+  }
   if (feof (fp)) return FALSE ;
-  if (getc(fp) != '\n') die ("end of line error for MaCS SITE %d", number) ;
+  
+  if (getc(fp) != '\n') {
+    die ("end of line error for MaCS SITE %d", number) ;
+  }
 
   return TRUE ;
 }
